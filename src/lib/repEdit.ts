@@ -29,14 +29,20 @@ export const applyBounds = (
   startsWith: Phase,
   fps: number,
 ): RepMetrics => {
+  const safeFps = fps > 0 ? fps : 30
+  const minPhase = 1 / safeFps
   const startSec = Math.max(0, bounds.startSec)
   const endSec = Math.max(bounds.endSec, startSec)
-  const turnSec = Math.min(Math.max(bounds.turnSec, startSec), endSec)
+  // Keep each phase at least one frame long (when there's room) so a collapsed
+  // boundary can't silently zero a rep's tempo/velocity.
+  let turnSec = Math.min(Math.max(bounds.turnSec, startSec), endSec)
+  if (endSec - startSec >= 2 * minPhase) {
+    turnSec = Math.min(Math.max(turnSec, startSec + minPhase), endSec - minPhase)
+  }
   const firstSec = turnSec - startSec
   const secondSec = endSec - turnSec
   const eccentricSec = startsWith === 'eccentric' ? firstSec : secondSec
   const concentricSec = startsWith === 'eccentric' ? secondSec : firstSec
-  const safeFps = fps > 0 ? fps : 30
   return {
     ...rep,
     startMs: startSec * 1000,

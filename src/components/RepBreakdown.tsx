@@ -20,7 +20,7 @@ export const RepBreakdown = ({
     <div className="breakdown">
       <div className="chart" role="img" aria-label="Mean concentric velocity per rep">
         {reps.map((r, i) => (
-          <div className="chart__col" key={r.startMs} title={`Rep ${i + 1}: ${(r.meanConcentricVelocity * 100).toFixed(0)} u/s`}>
+          <div className="chart__col" key={r.index} title={`Rep ${i + 1}: ${(r.meanConcentricVelocity * 100).toFixed(0)} u/s`}>
             <div className="chart__bar" style={{ height: `${Math.max(5, (r.meanConcentricVelocity / maxVel) * 100)}%` }} />
             <span className="chart__x">{i + 1}</span>
           </div>
@@ -42,7 +42,7 @@ export const RepBreakdown = ({
           </thead>
           <tbody>
             {reps.map((r, i) => (
-              <tr key={r.startMs}>
+              <tr key={r.index}>
                 <td>{i + 1}</td>
                 <td>{formatSeconds(r.eccentricMs)}</td>
                 <td>{formatSeconds(r.concentricMs)}</td>

@@ -25,7 +25,7 @@ export default defineConfig({
         navigateFallbackDenylist: [/^\/lift-stats\/mediapipe\//],
         runtimeCaching: [
           {
-            urlPattern: /\/mediapipe\/wasm\/.*\.(?:wasm|js)$/,
+            urlPattern: /\/mediapipe\/wasm\/.*\.wasm$/,
             handler: 'CacheFirst',
             options: {
               cacheName: 'mediapipe-wasm',

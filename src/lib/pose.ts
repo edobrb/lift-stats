@@ -35,14 +35,21 @@ export const createPoseEngine = async (): Promise<PoseEngine> => {
     lm: Awaited<ReturnType<typeof build>>
     delegate: 'GPU' | 'CPU'
   }> => {
+    let gpu: Awaited<ReturnType<typeof build>> | null = null
     try {
-      const gpu = await build('GPU')
+      gpu = await build('GPU')
       const probe = document.createElement('canvas')
       probe.width = 16
       probe.height = 16
       gpu.detectForVideo(probe, 0) // throws here if the GPU graph is broken
       return { lm: gpu, delegate: 'GPU' }
     } catch {
+      // Free the half-built GPU instance (native wasm/WebGL resources) before CPU.
+      try {
+        gpu?.close()
+      } catch {
+        /* ignore */
+      }
       return { lm: await build('CPU'), delegate: 'CPU' }
     }
   }

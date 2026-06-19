@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ExerciseId, LiftSet } from '../types'
 import { EXERCISE_ORDER, EXERCISES, getExercise } from '../config/exercises'
-import { listSetsByProfile } from '../storage/sets'
+import { listSetsByProfile, deleteSet } from '../storage/sets'
 import { aggregateReps } from '../lib/metrics'
 import { useApp } from '../state/store'
 import { navigate } from '../hooks/useRouter'
@@ -33,6 +33,12 @@ export const HistoryScreen = () => {
       active = false
     }
   }, [app.profileId])
+
+  const remove = async (setId: string, label: string) => {
+    if (!window.confirm(`Delete this ${label} set and its recording?`)) return
+    await deleteSet(setId)
+    setSets((current) => current.filter((s) => s.id !== setId))
+  }
 
   const shown = filter === 'all' ? sets : sets.filter((s) => s.exercise === filter)
 
@@ -69,8 +75,11 @@ export const HistoryScreen = () => {
                   <span className="muted block">
                     {set.repCount} reps · {formatSeconds(agg.avgEccentricMs)}↓ / {formatSeconds(agg.avgConcentricMs)}↑ · TUT {formatClock(agg.timeUnderTensionMs)}
                   </span>
+                  <span className="muted small">{formatDate(set.startedAt)}</span>
                 </span>
-                <span className="muted small nowrap">{formatDate(set.startedAt)}</span>
+              </button>
+              <button className="iconbtn" aria-label="Delete set" onClick={() => remove(set.id, ex.name)}>
+                🗑
               </button>
             </li>
           )

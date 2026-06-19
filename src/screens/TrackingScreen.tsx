@@ -1,8 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import type { LiftSet } from '../types'
 import { EXERCISES, getExercise } from '../config/exercises'
 import { sessionStore, useApp, useSession } from '../state/store'
-import { usePoseTracker } from '../hooks/usePoseTracker'
+import { usePoseTracker, type SetResult } from '../hooks/usePoseTracker'
 import { navigate, redirect } from '../hooks/useRouter'
 import { makeId } from '../lib/id'
 
@@ -16,7 +16,34 @@ export const TrackingScreen = () => {
   const startedAtRef = useRef(0)
 
   const exercise = pending ? getExercise(pending.exercise) : EXERCISES.squat
-  const tracker = usePoseTracker(videoRef, canvasRef, exercise, app.recordVideo)
+
+  // Assemble the set and go to review. Used both by Stop and by the background-stop
+  // handler (so a set is never lost when the OS backgrounds the page mid-set).
+  const buildAndReview = useCallback(
+    (result: SetResult) => {
+      if (!pending) return
+      const set: LiftSet = {
+        id: makeId(),
+        profileId: app.profileId ?? 'unknown',
+        exercise: pending.exercise,
+        weight: pending.weight,
+        unit: app.unit,
+        startedAt: startedAtRef.current || Date.now(),
+        durationMs: result.durationMs,
+        fps: Math.round(result.fps),
+        reps: result.reps,
+        repCount: result.reps.length,
+        hasVideo: result.video !== null,
+        videoMime: result.video?.mime ?? null,
+        notes: '',
+      }
+      sessionStore.set({ review: { set, video: result.video } })
+      navigate({ name: 'review' })
+    },
+    [app.profileId, app.unit, pending],
+  )
+
+  const tracker = usePoseTracker(videoRef, canvasRef, exercise, app.recordVideo, buildAndReview)
 
   useEffect(() => {
     if (!pending) redirect({ name: 'home' })
@@ -30,24 +57,7 @@ export const TrackingScreen = () => {
   }
 
   const handleStop = async () => {
-    const result = await tracker.stop()
-    const set: LiftSet = {
-      id: makeId(),
-      profileId: app.profileId ?? 'unknown',
-      exercise: pending.exercise,
-      weight: pending.weight,
-      unit: app.unit,
-      startedAt: startedAtRef.current || Date.now(),
-      durationMs: result.durationMs,
-      fps: Math.round(result.fps),
-      reps: result.reps,
-      repCount: result.reps.length,
-      hasVideo: result.video !== null,
-      videoMime: result.video?.mime ?? null,
-      notes: '',
-    }
-    sessionStore.set({ review: { set, video: result.video } })
-    navigate({ name: 'review' })
+    buildAndReview(await tracker.stop())
   }
 
   const weightLabel = pending.weight !== null ? ` · ${pending.weight}${app.unit}` : ''

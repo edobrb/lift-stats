@@ -30,6 +30,17 @@ export const SetDetailScreen = ({ id }: { id: string }) => {
     }
   }, [id])
 
+  // Warn before a full page unload while rep-boundary edits are unsaved.
+  useEffect(() => {
+    if (!dirty) return
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [dirty])
+
   const remove = async () => {
     if (!window.confirm('Delete this set and its recording?')) return
     await deleteSet(id)
@@ -38,9 +49,11 @@ export const SetDetailScreen = ({ id }: { id: string }) => {
 
   const saveEdits = async () => {
     if (!set) return
-    const updated = { ...set, reps, repCount: reps.length }
+    const reindexed = reps.map((r, i) => ({ ...r, index: i + 1 }))
+    const updated = { ...set, reps: reindexed, repCount: reindexed.length }
     await updateSet(updated)
     setSet(updated)
+    setReps(reindexed)
     setDirty(false)
   }
 
@@ -49,6 +62,11 @@ export const SetDetailScreen = ({ id }: { id: string }) => {
       setReps(set.reps)
       setDirty(false)
     }
+  }
+
+  const removeRep = (rep: RepMetrics) => {
+    setReps((current) => current.filter((r) => r !== rep))
+    setDirty(true)
   }
 
   if (loading) {
@@ -117,7 +135,8 @@ export const SetDetailScreen = ({ id }: { id: string }) => {
 
       <section className="section">
         <h3>Per-rep breakdown</h3>
-        <RepBreakdown reps={reps} />
+        <p className="muted small">Tap ✕ to drop a misdetected rep, then Save changes.</p>
+        <RepBreakdown reps={reps} onRemove={removeRep} />
       </section>
 
       <div className="actions">

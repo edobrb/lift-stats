@@ -89,6 +89,17 @@ h3 {
 .screen__head {
   margin-bottom: 18px;
 }
+.detailbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.btn--sm {
+  padding: 8px 14px;
+  font-size: 0.85rem;
+}
 
 /* ---- Buttons & inputs ---- */
 .btn {
@@ -472,10 +483,10 @@ h3 {
 }
 .timeline {
   position: relative;
-  height: 46px;
+  height: 60px;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   touch-action: none;
   cursor: pointer;
@@ -578,6 +589,74 @@ h3 {
   flex: 1;
   padding: 12px 6px;
   font-size: 0.85rem;
+}
+
+/* Draggable boundary handles on the timeline */
+.handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 26px;
+  margin-left: -13px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 3;
+}
+.handle__grip {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 4px;
+  height: 76%;
+  border-radius: 3px;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4);
+}
+.handle--turn .handle__grip {
+  background: #fbbf24;
+}
+.handle.is-active .handle__grip {
+  width: 7px;
+  box-shadow: 0 0 0 2px var(--accent), 0 0 8px rgba(56, 189, 248, 0.6);
+}
+.boundaries {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0 10px;
+}
+.boundary {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 9px 6px;
+  color: var(--text);
+  cursor: pointer;
+}
+.boundary.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.boundary__label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.boundary.is-active .boundary__label {
+  color: var(--accent);
+}
+.boundary__time {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---- Actions ---- */

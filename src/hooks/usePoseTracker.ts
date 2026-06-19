@@ -45,6 +45,9 @@ export const usePoseTracker = (
   canvasRef: RefObject<HTMLCanvasElement | null>,
   exercise: ExerciseConfig,
   recordVideo: boolean,
+  // Called when the OS backgrounds the page mid-set: we stop & hand back the result
+  // so the screen can preserve it (rather than discarding the recording).
+  onBackgroundStop?: (result: SetResult) => void,
 ) => {
   const [status, setStatus] = useState<TrackerStatus>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -69,6 +72,8 @@ export const usePoseTracker = (
   const lastMediaRef = useRef(0)
   const lastUiRef = useRef(0)
   const lastRepRef = useRef<{ ecc: number; con: number } | null>(null)
+  const frameSeenRef = useRef(false)
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const onFrame = useCallback(
     (info: FrameInfo) => {
@@ -77,6 +82,7 @@ export const usePoseTracker = (
       const engine = engineRef.current
       const detector = detectorRef.current
       if (!video || !canvas || !engine || !detector || video.videoWidth === 0) return
+      frameSeenRef.current = true
 
       syncCanvasSize(canvas, video)
       const ctx = canvas.getContext('2d')
@@ -147,6 +153,10 @@ export const usePoseTracker = (
 
   // Release everything (frame loop, recorder, camera) without producing a set.
   const teardown = useCallback(() => {
+    if (watchdogRef.current) {
+      clearTimeout(watchdogRef.current)
+      watchdogRef.current = null
+    }
     stopLoopRef.current?.()
     stopLoopRef.current = null
     const recorder = recorderRef.current
@@ -175,6 +185,7 @@ export const usePoseTracker = (
       startFramesRef.current = null
       fpsRef.current = 0
       lastRepRef.current = null
+      frameSeenRef.current = false
 
       if (!engineRef.current) engineRef.current = await createPoseEngine()
       const stream = await startCamera(video)
@@ -182,16 +193,38 @@ export const usePoseTracker = (
       recorderRef.current = recordVideo ? startRecorder(stream) : null
       setStatus('tracking')
       stopLoopRef.current = startFrameLoop(video, onFrame)
+
+      // Watchdog: a stuck/paused stream presents no frames; surface an error
+      // instead of sitting on a frozen "tracking" screen forever.
+      if (watchdogRef.current) clearTimeout(watchdogRef.current)
+      watchdogRef.current = setTimeout(() => {
+        if (!frameSeenRef.current) {
+          teardown()
+          setStatus('error')
+          setError('The camera started but produced no frames. Try again or check camera permissions.')
+        }
+      }, 3000)
     } catch (err) {
       stopCamera(streamRef.current, video)
       streamRef.current = null
       setStatus('error')
-      setError(err instanceof Error ? err.message : 'Could not start the camera.')
+      const offline = typeof navigator !== 'undefined' && navigator.onLine === false
+      setError(
+        offline
+          ? 'You appear to be offline and the pose engine isn’t cached yet. Connect once and start a set to enable offline tracking afterwards.'
+          : err instanceof Error
+            ? err.message
+            : 'Could not start the camera.',
+      )
     }
-  }, [exercise, recordVideo, onFrame, videoRef, canvasRef])
+  }, [exercise, recordVideo, onFrame, teardown, videoRef, canvasRef])
 
   const stop = useCallback(async (): Promise<SetResult> => {
     setStatus('stopping')
+    if (watchdogRef.current) {
+      clearTimeout(watchdogRef.current)
+      watchdogRef.current = null
+    }
     stopLoopRef.current?.()
     stopLoopRef.current = null
 
@@ -204,7 +237,14 @@ export const usePoseTracker = (
 
     const detector = detectorRef.current
     if (detector) finalizeRepDetector(detector)
-    const reps = detector ? detector.reps : []
+    // Rebase rep times to be zero-based against the recorded video (whose playback
+    // timeline starts at ~0), so the editor's handles line up with the footage.
+    const origin = (startMediaRef.current ?? 0) * 1000
+    const reps = (detector ? detector.reps : []).map((r) => ({
+      ...r,
+      startMs: Math.max(0, r.startMs - origin),
+      endMs: Math.max(0, r.endMs - origin),
+    }))
     const durationMs = Math.max(0, (lastMediaRef.current - (startMediaRef.current ?? lastMediaRef.current)) * 1000)
 
     setStatus('idle')
@@ -222,24 +262,25 @@ export const usePoseTracker = (
     [teardown],
   )
 
-  // iOS Safari keeps camera + recorder alive when the page is backgrounded and may
-  // suspend without unmounting — release on pagehide / tab-hide while tracking.
+  // iOS Safari keeps camera + recorder alive when backgrounded and may suspend the
+  // page without unmounting. While tracking: if the tab is hidden (app switch,
+  // notification) we stop and hand the set back so it's preserved, not discarded;
+  // on terminal pagehide we best-effort release the hardware.
   useEffect(() => {
     if (status !== 'tracking') return
-    const release = () => {
-      teardown()
-      setStatus('idle')
-    }
     const onVisibility = () => {
-      if (document.visibilityState === 'hidden') release()
+      if (document.visibilityState === 'hidden') {
+        void stop().then((result) => onBackgroundStop?.(result))
+      }
     }
-    window.addEventListener('pagehide', release)
+    const onPageHide = () => teardown()
     document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', onPageHide)
     return () => {
-      window.removeEventListener('pagehide', release)
       document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', onPageHide)
     }
-  }, [status, teardown])
+  }, [status, stop, teardown, onBackgroundStop])
 
   return { status, error, live, start, stop, cancel }
 }

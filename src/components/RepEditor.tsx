@@ -3,10 +3,11 @@ import type { Phase, RepMetrics } from '../types'
 import { applyBounds, repBounds, turnaroundLabel } from '../lib/repEdit'
 import { formatSeconds } from '../lib/timing'
 
-// Advanced video tooling: rewatch the set and fine-tune each rep's start /
-// turnaround / end against the footage. Controlled component — edits are pushed up
-// via onChange so the parent owns the (persisted) rep array.
+type Handle = 'start' | 'turn' | 'end'
 
+// Advanced video tooling: rewatch the set and fine-tune each rep by dragging its
+// start / turnaround / end handles directly on the timeline (frame-nudge for
+// precision). Controlled — edits are pushed up via onChange.
 export const RepEditor = ({
   blob,
   reps,
@@ -23,18 +24,18 @@ export const RepEditor = ({
   const videoRef = useRef<HTMLVideoElement>(null)
   const trackRef = useRef<HTMLDivElement>(null)
   const playUntilRef = useRef<number | null>(null)
-  const scrubbingRef = useRef(false)
+  const draggingRef = useRef<Handle | null>(null)
 
   const [duration, setDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [selected, setSelected] = useState(0)
+  const [activeHandle, setActiveHandle] = useState<Handle>('start')
 
   const step = 1 / (fps > 0 ? fps : 30)
   const fallbackEnd = reps.reduce((m, r) => Math.max(m, r.endMs / 1000), 1)
   const dur = duration > 0 && Number.isFinite(duration) ? duration : fallbackEnd
 
-  // Object URL lifecycle.
   useEffect(() => {
     const url = URL.createObjectURL(blob)
     const v = videoRef.current
@@ -42,8 +43,7 @@ export const RepEditor = ({
     return () => URL.revokeObjectURL(url)
   }, [blob])
 
-  // MediaRecorder webm/mp4 blobs often report duration = Infinity until you seek to
-  // the end once — force it so the timeline has a real length.
+  // MediaRecorder blobs often report duration = Infinity until you seek to the end.
   const onLoadedMetadata = () => {
     const v = videoRef.current
     if (!v) return
@@ -65,7 +65,11 @@ export const RepEditor = ({
     if (!v) return
     setCurrentTime(v.currentTime)
     if (playUntilRef.current !== null && v.currentTime >= playUntilRef.current) {
+      // timeupdate is coarse — clamp the playhead back to the exact rep end.
+      const end = playUntilRef.current
       v.pause()
+      v.currentTime = end
+      setCurrentTime(end)
       playUntilRef.current = null
     }
   }
@@ -81,12 +85,6 @@ export const RepEditor = ({
     [dur],
   )
 
-  const stepFrames = (n: number) => {
-    videoRef.current?.pause()
-    playUntilRef.current = null
-    seek(currentTime + n * step)
-  }
-
   const togglePlay = () => {
     const v = videoRef.current
     if (!v) return
@@ -95,93 +93,121 @@ export const RepEditor = ({
     else v.pause()
   }
 
+  // Clamp the selection so removing a rep elsewhere can't leave it out of range.
+  const sel = reps.length > 0 ? Math.min(selected, reps.length - 1) : -1
+  const rep = sel >= 0 ? reps[sel] : undefined
+  const bounds = rep ? repBounds(rep, startsWith) : null
+
   const playRep = () => {
-    const rep = reps[selected]
     const v = videoRef.current
-    if (!rep || !v) return
-    const b = repBounds(rep, startsWith)
-    seek(b.startSec)
-    playUntilRef.current = b.endSec
+    if (!bounds || !v) return
+    seek(bounds.startSec)
+    playUntilRef.current = bounds.endSec
     void v.play()
   }
 
-  const timeFromPointer = (e: ReactPointerEvent) => {
+  const pct = (sec: number) => `${dur > 0 ? Math.min(100, Math.max(0, (sec / dur) * 100)) : 0}%`
+
+  // Apply a new time to one handle of the selected rep (clamped to neighbours).
+  const applyHandle = (which: Handle, t: number) => {
+    if (!rep || !bounds) return
+    const prevEnd = sel > 0 ? reps[sel - 1]!.endMs / 1000 : 0
+    const nextStart = sel < reps.length - 1 ? reps[sel + 1]!.startMs / 1000 : dur
+    const next = { ...bounds }
+    let landed = t
+    if (which === 'start') {
+      landed = Math.min(Math.max(t, prevEnd), bounds.turnSec)
+      next.startSec = landed
+    } else if (which === 'turn') {
+      landed = Math.min(Math.max(t, bounds.startSec), bounds.endSec)
+      next.turnSec = landed
+    } else {
+      landed = Math.max(Math.min(t, nextStart), bounds.turnSec)
+      next.endSec = landed
+    }
+    onChange(reps.map((r, i) => (i === sel ? applyBounds(rep, next, startsWith, fps) : r)))
+    seek(landed)
+  }
+
+  const nudge = (frames: number) => {
+    if (!bounds) return
+    const cur = activeHandle === 'start' ? bounds.startSec : activeHandle === 'turn' ? bounds.turnSec : bounds.endSec
+    applyHandle(activeHandle, cur + frames * step)
+  }
+
+  const timeFromPointer = (clientX: number) => {
     const el = trackRef.current
     if (!el) return 0
     const rect = el.getBoundingClientRect()
-    const ratio = (e.clientX - rect.left) / rect.width
-    return Math.min(Math.max(0, ratio), 1) * dur
+    return Math.min(Math.max(0, (clientX - rect.left) / rect.width), 1) * dur
   }
 
-  const onTrackDown = (e: ReactPointerEvent) => {
-    scrubbingRef.current = true
+  // Drag a boundary handle.
+  const onHandleDown = (e: ReactPointerEvent, which: Handle) => {
+    e.stopPropagation()
     e.currentTarget.setPointerCapture(e.pointerId)
+    draggingRef.current = which
+    setActiveHandle(which)
     videoRef.current?.pause()
     playUntilRef.current = null
-    seek(timeFromPointer(e))
   }
-  const onTrackMove = (e: ReactPointerEvent) => {
-    if (scrubbingRef.current) seek(timeFromPointer(e))
+  const onHandleMove = (e: ReactPointerEvent) => {
+    if (draggingRef.current) applyHandle(draggingRef.current, timeFromPointer(e.clientX))
   }
-  const onTrackUp = () => {
-    scrubbingRef.current = false
+  const onHandleUp = () => {
+    draggingRef.current = null
   }
 
-  const setPoint = (which: 'start' | 'turn' | 'end') => {
-    const rep = reps[selected]
-    if (!rep) return
-    const b = repBounds(rep, startsWith)
-    const next =
-      which === 'start'
-        ? { ...b, startSec: currentTime }
-        : which === 'turn'
-          ? { ...b, turnSec: currentTime }
-          : { ...b, endSec: currentTime }
-    const updated = applyBounds(rep, next, startsWith, fps)
-    onChange(reps.map((r, i) => (i === selected ? updated : r)))
+  // Scrubbing the empty track moves the playhead (view only).
+  const onTrackDown = (e: ReactPointerEvent) => {
+    e.currentTarget.setPointerCapture(e.pointerId)
+    draggingRef.current = null
+    videoRef.current?.pause()
+    playUntilRef.current = null
+    seek(timeFromPointer(e.clientX))
+  }
+  const onTrackMove = (e: ReactPointerEvent) => {
+    if (!draggingRef.current && e.buttons > 0) seek(timeFromPointer(e.clientX))
   }
 
   const selectRep = (i: number) => {
     setSelected(i)
-    const rep = reps[i]
-    if (rep) seek(rep.startMs / 1000)
+    setActiveHandle('start')
+    const r = reps[i]
+    if (r) seek(r.startMs / 1000)
   }
 
-  const pct = (sec: number) => `${dur > 0 ? (sec / dur) * 100 : 0}%`
-  const rep = reps[selected]
-  const bounds = rep ? repBounds(rep, startsWith) : null
+  const eccFirst = startsWith === 'eccentric'
+  const handleTime = (h: Handle) => (!bounds ? 0 : h === 'start' ? bounds.startSec : h === 'turn' ? bounds.turnSec : bounds.endSec)
 
   return (
     <div className="editor">
-      <video
-        ref={videoRef}
-        className="replay"
-        playsInline
-        onLoadedMetadata={onLoadedMetadata}
-        onTimeUpdate={onTimeUpdate}
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-      />
+      <div className="editor__videowrap">
+        <video
+          ref={videoRef}
+          className="replay"
+          playsInline
+          onLoadedMetadata={onLoadedMetadata}
+          onTimeUpdate={onTimeUpdate}
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+        />
+      </div>
 
       <div
         className="timeline"
         ref={trackRef}
         onPointerDown={onTrackDown}
         onPointerMove={onTrackMove}
-        onPointerUp={onTrackUp}
-        onPointerCancel={onTrackUp}
       >
         {reps.map((r, i) => {
           const b = repBounds(r, startsWith)
-          const eccFirst = startsWith === 'eccentric'
           return (
-            <div key={r.startMs} className={`timeline__rep${i === selected ? ' is-selected' : ''}`}>
-              {/* first phase */}
+            <div key={r.index} className={`timeline__rep${i === sel ? ' is-selected' : ''}`}>
               <span
                 className={`timeline__seg ${eccFirst ? 'seg--ecc' : 'seg--con'}`}
                 style={{ left: pct(b.startSec), width: pct(b.turnSec - b.startSec) }}
               />
-              {/* second phase */}
               <span
                 className={`timeline__seg ${eccFirst ? 'seg--con' : 'seg--ecc'}`}
                 style={{ left: pct(b.turnSec), width: pct(b.endSec - b.turnSec) }}
@@ -189,6 +215,25 @@ export const RepEditor = ({
             </div>
           )
         })}
+
+        {bounds &&
+          (['start', 'turn', 'end'] as Handle[]).map((h) => (
+            <div
+              key={h}
+              className={`handle handle--${h}${activeHandle === h ? ' is-active' : ''}`}
+              style={{ left: pct(handleTime(h)) }}
+              onPointerDown={(e) => onHandleDown(e, h)}
+              onPointerMove={onHandleMove}
+              onPointerUp={onHandleUp}
+              onPointerCancel={onHandleUp}
+              role="slider"
+              aria-label={`${h === 'turn' ? turnaroundLabel(startsWith) : h} of rep ${sel + 1}`}
+              aria-valuenow={Math.round(handleTime(h) * 1000)}
+            >
+              <span className="handle__grip" />
+            </div>
+          ))}
+
         <span className="timeline__playhead" style={{ left: pct(currentTime) }} />
       </div>
 
@@ -196,13 +241,13 @@ export const RepEditor = ({
         <button className="tbtn" aria-label="Jump to rep start" onClick={() => bounds && seek(bounds.startSec)}>
           ⏮
         </button>
-        <button className="tbtn" aria-label="Step back one frame" onClick={() => stepFrames(-1)}>
+        <button className="tbtn" aria-label="Nudge active boundary back one frame" onClick={() => nudge(-1)}>
           ◁
         </button>
         <button className="tbtn tbtn--play" aria-label={playing ? 'Pause' : 'Play'} onClick={togglePlay}>
           {playing ? '❚❚' : '▶'}
         </button>
-        <button className="tbtn" aria-label="Step forward one frame" onClick={() => stepFrames(1)}>
+        <button className="tbtn" aria-label="Nudge active boundary forward one frame" onClick={() => nudge(1)}>
           ▷
         </button>
         <button className="tbtn" aria-label="Play this rep" onClick={playRep}>
@@ -215,11 +260,7 @@ export const RepEditor = ({
 
       <div className="rep-picker">
         {reps.map((r, i) => (
-          <button
-            key={r.startMs}
-            className={`rep-pip${i === selected ? ' is-active' : ''}`}
-            onClick={() => selectRep(i)}
-          >
+          <button key={r.index} className={`rep-pip${i === sel ? ' is-active' : ''}`} onClick={() => selectRep(i)}>
             {i + 1}
           </button>
         ))}
@@ -228,30 +269,27 @@ export const RepEditor = ({
       {rep && bounds && (
         <div className="card editor__panel">
           <div className="editor__row">
-            <strong>Rep {selected + 1}</strong>
+            <strong>Rep {sel + 1}</strong>
             <span className="muted small">
               {formatSeconds(rep.eccentricMs)} ↓ / {formatSeconds(rep.concentricMs)} ↑
             </span>
           </div>
-          <div className="editor__row muted small">
-            <span>start {bounds.startSec.toFixed(2)}s</span>
-            <span>
-              {turnaroundLabel(startsWith)} {bounds.turnSec.toFixed(2)}s
-            </span>
-            <span>end {bounds.endSec.toFixed(2)}s</span>
+          <div className="boundaries">
+            {(['start', 'turn', 'end'] as Handle[]).map((h) => (
+              <button
+                key={h}
+                className={`boundary${activeHandle === h ? ' is-active' : ''}`}
+                onClick={() => {
+                  setActiveHandle(h)
+                  seek(handleTime(h))
+                }}
+              >
+                <span className="boundary__label">{h === 'turn' ? turnaroundLabel(startsWith) : h}</span>
+                <span className="boundary__time">{handleTime(h).toFixed(2)}s</span>
+              </button>
+            ))}
           </div>
-          <p className="muted small">Scrub or step to a frame, then set a boundary to the playhead:</p>
-          <div className="setpoints">
-            <button className="btn btn--ghost" onClick={() => setPoint('start')}>
-              ◁ Set start
-            </button>
-            <button className="btn btn--ghost" onClick={() => setPoint('turn')}>
-              Set {turnaroundLabel(startsWith)}
-            </button>
-            <button className="btn btn--ghost" onClick={() => setPoint('end')}>
-              Set end ▷
-            </button>
-          </div>
+          <p className="muted small">Drag a handle on the bar, or pick a boundary and use ◁ ▷ to nudge it frame-by-frame.</p>
         </div>
       )}
     </div>
