@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react'
-import type { LiftSet } from '../types'
+import type { LiftSet, RepMetrics } from '../types'
 import { getExercise } from '../config/exercises'
 import { aggregateReps, velocityLossPct } from '../lib/metrics'
-import { getSet, getSetVideo, deleteSet } from '../storage/sets'
+import { getSet, getSetVideo, deleteSet, updateSet } from '../storage/sets'
 import { navigate } from '../hooks/useRouter'
 import { formatClock, formatDate, formatRom, formatSeconds, formatVelocity } from '../lib/timing'
 import { Stat } from '../components/Stat'
 import { RepBreakdown } from '../components/RepBreakdown'
-import { VideoView } from '../components/VideoView'
+import { RepEditor } from '../components/RepEditor'
 
 export const SetDetailScreen = ({ id }: { id: string }) => {
   const [set, setSet] = useState<LiftSet | null>(null)
   const [videoBlob, setVideoBlob] = useState<Blob | null>(null)
+  const [reps, setReps] = useState<RepMetrics[]>([])
+  const [dirty, setDirty] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -19,6 +21,7 @@ export const SetDetailScreen = ({ id }: { id: string }) => {
     Promise.all([getSet(id), getSetVideo(id)]).then(([found, video]) => {
       if (!active) return
       setSet(found ?? null)
+      setReps(found?.reps ?? [])
       setVideoBlob(video?.blob ?? null)
       setLoading(false)
     })
@@ -31,6 +34,21 @@ export const SetDetailScreen = ({ id }: { id: string }) => {
     if (!window.confirm('Delete this set and its recording?')) return
     await deleteSet(id)
     navigate({ name: 'history' })
+  }
+
+  const saveEdits = async () => {
+    if (!set) return
+    const updated = { ...set, reps, repCount: reps.length }
+    await updateSet(updated)
+    setSet(updated)
+    setDirty(false)
+  }
+
+  const resetEdits = () => {
+    if (set) {
+      setReps(set.reps)
+      setDirty(false)
+    }
   }
 
   if (loading) {
@@ -53,7 +71,7 @@ export const SetDetailScreen = ({ id }: { id: string }) => {
   }
 
   const exercise = getExercise(set.exercise)
-  const agg = aggregateReps(set.reps)
+  const agg = aggregateReps(reps)
 
   return (
     <div className="screen screen--pad">
@@ -77,20 +95,29 @@ export const SetDetailScreen = ({ id }: { id: string }) => {
         <Stat label="Time under tension" value={formatClock(agg.timeUnderTensionMs)} />
         <Stat label="Avg ROM" value={formatRom(agg.avgRangeOfMotion)} />
         <Stat label="Best velocity" value={formatVelocity(agg.bestConcentricVelocity)} />
-        <Stat label="Velocity loss" value={`${velocityLossPct(set.reps)}%`} />
+        <Stat label="Velocity loss" value={`${velocityLossPct(reps)}%`} />
         <Stat label="Avg peak vel" value={formatVelocity(agg.avgPeakVelocity)} />
       </div>
 
-      {videoBlob && (
+      {videoBlob ? (
         <section className="section">
-          <h3>Recording</h3>
-          <VideoView blob={videoBlob} />
+          <h3>Rewatch & adjust reps</h3>
+          <RepEditor
+            blob={videoBlob}
+            reps={reps}
+            startsWith={exercise.startsWith}
+            fps={set.fps}
+            onChange={(next) => {
+              setReps(next)
+              setDirty(true)
+            }}
+          />
         </section>
-      )}
+      ) : null}
 
       <section className="section">
         <h3>Per-rep breakdown</h3>
-        <RepBreakdown reps={set.reps} />
+        <RepBreakdown reps={reps} />
       </section>
 
       <div className="actions">
@@ -98,6 +125,17 @@ export const SetDetailScreen = ({ id }: { id: string }) => {
           Delete set
         </button>
       </div>
+
+      {dirty && (
+        <div className="actions actions--sticky">
+          <button className="btn btn--ghost" onClick={resetEdits}>
+            Reset
+          </button>
+          <button className="btn btn--primary" onClick={saveEdits}>
+            Save changes
+          </button>
+        </div>
+      )}
     </div>
   )
 }

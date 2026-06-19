@@ -464,6 +464,122 @@ h3 {
   display: block;
 }
 
+/* ---- Rep editor ---- */
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.timeline {
+  position: relative;
+  height: 46px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  touch-action: none;
+  cursor: pointer;
+}
+.timeline__rep {
+  position: absolute;
+  inset: 0;
+}
+.timeline__rep.is-selected .timeline__seg {
+  top: 8px;
+  bottom: 8px;
+  filter: brightness(1.25);
+}
+.timeline__seg {
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  border-radius: 3px;
+  opacity: 0.9;
+}
+.seg--ecc {
+  background: var(--red);
+}
+.seg--con {
+  background: var(--green);
+}
+.timeline__playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #fff;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.7);
+  pointer-events: none;
+}
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tbtn {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  min-width: 44px;
+  height: 44px;
+  font-size: 1rem;
+  cursor: pointer;
+}
+.tbtn:active {
+  transform: scale(0.94);
+}
+.tbtn--play {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+.transport__time {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.rep-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rep-pip {
+  min-width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-weight: 600;
+  cursor: pointer;
+}
+.rep-pip.is-active {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+.editor__panel {
+  margin: 0;
+}
+.editor__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.setpoints {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.setpoints .btn {
+  flex: 1;
+  padding: 12px 6px;
+  font-size: 0.85rem;
+}
+
 /* ---- Actions ---- */
 .actions {
   display: flex;

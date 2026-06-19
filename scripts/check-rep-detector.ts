@@ -6,6 +6,7 @@ import {
   finalizeRepDetector,
 } from '../src/lib/repDetector'
 import { EXERCISES } from '../src/config/exercises'
+import { repBounds, applyBounds } from '../src/lib/repEdit'
 import type { ExerciseId, RepMetrics } from '../src/types'
 
 interface Sample {
@@ -124,6 +125,42 @@ for (const c of cases) {
     expect(`${c.label}: frame counts populated`, fr.eccentricFrames > 0 && fr.concentricFrames > 0, `ecc=${fr.eccentricFrames} con=${fr.concentricFrames} frames`)
   }
 }
+
+// ---- Rep-boundary editing (RepEditor math) --------------------------------
+console.log('\nRep-boundary editing')
+const baseRep = (over: Partial<RepMetrics>): RepMetrics => ({
+  index: 1,
+  eccentricMs: 2000,
+  concentricMs: 1000,
+  eccentricFrames: 60,
+  concentricFrames: 30,
+  rangeOfMotion: 0.4,
+  peakVelocity: 0.5,
+  meanConcentricVelocity: 0.4,
+  startMs: 1000,
+  endMs: 4000,
+  ...over,
+})
+
+// Squat (eccentric-first): turnaround = start + eccentric.
+const sq = baseRep({})
+const sqB = repBounds(sq, 'eccentric')
+expect('repBounds: squat turnaround', Math.abs(sqB.turnSec - 3.0) < 1e-6, `turn=${sqB.turnSec}s (want 3.0)`)
+// Extend the end by 1s → concentric grows to 2s, eccentric unchanged.
+const sqEdited = applyBounds(sq, { ...sqB, endSec: 5.0 }, 'eccentric', 30)
+expect('applyBounds: squat extend end', Math.abs(sqEdited.eccentricMs - 2000) < 1 && Math.abs(sqEdited.concentricMs - 2000) < 1, `ecc=${sqEdited.eccentricMs} con=${sqEdited.concentricMs}`)
+expect('applyBounds: frame recompute', sqEdited.concentricFrames === 60, `${sqEdited.concentricFrames} frames (want 60)`)
+
+// Deadlift (concentric-first): first phase is concentric.
+const dl = baseRep({ concentricMs: 1500, eccentricMs: 1200, endMs: 3700 })
+const dlB = repBounds(dl, 'concentric')
+expect('repBounds: deadlift turnaround', Math.abs(dlB.turnSec - 2.5) < 1e-6, `turn=${dlB.turnSec}s (want 2.5)`)
+const dlEdited = applyBounds(dl, { ...dlB, startSec: 0.5 }, 'concentric', 30)
+expect('applyBounds: deadlift move start', Math.abs(dlEdited.concentricMs - 2000) < 1 && Math.abs(dlEdited.eccentricMs - 1200) < 1, `con=${dlEdited.concentricMs} ecc=${dlEdited.eccentricMs}`)
+
+// Clamp: a turnaround past the end is pinned to the end (no negative phase).
+const clamped = applyBounds(sq, { startSec: 1, turnSec: 9, endSec: 4 }, 'eccentric', 30)
+expect('applyBounds: clamps turnaround', clamped.concentricMs >= 0 && clamped.eccentricMs >= 0, `ecc=${clamped.eccentricMs} con=${clamped.concentricMs}`)
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)

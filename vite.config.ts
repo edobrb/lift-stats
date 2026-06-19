@@ -8,6 +8,9 @@ import { VitePWA } from 'vite-plugin-pwa'
 const useHttps = process.env.VITE_HTTPS === '1'
 
 export default defineConfig({
+  // Served from https://<user>.github.io/lift-stats/ — all asset URLs must be
+  // prefixed with this base. `src/lib/pose.ts` already reads import.meta.env.BASE_URL.
+  base: '/lift-stats/',
   plugins: [
     react(),
     ...(useHttps ? [basicSsl()] : []),
@@ -19,7 +22,7 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,task}'],
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
-        navigateFallbackDenylist: [/^\/mediapipe\//],
+        navigateFallbackDenylist: [/^\/lift-stats\/mediapipe\//],
         runtimeCaching: [
           {
             urlPattern: /\/mediapipe\/wasm\/.*\.(?:wasm|js)$/,
@@ -41,8 +44,8 @@ export default defineConfig({
         background_color: '#0b0f17',
         display: 'standalone',
         orientation: 'portrait',
-        start_url: '/',
-        scope: '/',
+        start_url: '/lift-stats/',
+        scope: '/lift-stats/',
         icons: [
           { src: 'pwa-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
           { src: 'pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
