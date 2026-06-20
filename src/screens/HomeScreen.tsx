@@ -29,7 +29,7 @@ export const HomeScreen = () => {
     if (!selected) return
     const parsed = weight.trim() === '' ? null : Number(weight)
     const validWeight = parsed !== null && Number.isFinite(parsed) && parsed >= 0 ? parsed : null
-    sessionStore.set({ pending: { exercise: selected, weight: validWeight }, review: null })
+    sessionStore.set({ pending: { exercise: selected, weight: validWeight } })
     navigate({ name: 'track' })
   }
 

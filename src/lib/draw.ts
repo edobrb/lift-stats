@@ -1,4 +1,4 @@
-import type { Landmark, Phase } from '../types'
+import type { Landmark, PhaseKind } from '../types'
 
 // Canvas overlay: the live camera frame, the pose skeleton, the tracked point,
 // a position trace, and the heads-up stats. Drawn in canvas pixel space, which
@@ -6,6 +6,7 @@ import type { Landmark, Phase } from '../types'
 
 const ECCENTRIC_COLOR = '#f43f5e'
 const CONCENTRIC_COLOR = '#22c55e'
+const HOLD_COLOR = '#fbbf24' // amber — the lifter is paused/holding at an extreme
 const ACCENT = '#38bdf8'
 const DIM = 'rgba(255,255,255,0.55)'
 
@@ -18,7 +19,7 @@ const CONNECTIONS: ReadonlyArray<readonly [number, number]> = [
 export interface Hud {
   exerciseName: string
   repCount: number
-  phase: Phase | null
+  phase: PhaseKind | null
   phaseElapsedMs: number
   fps: number
   lastEccentricMs: number | null
@@ -28,8 +29,27 @@ export interface Hud {
   status: string
 }
 
-const phaseColor = (phase: Phase | null): string =>
-  phase === 'eccentric' ? ECCENTRIC_COLOR : phase === 'concentric' ? CONCENTRIC_COLOR : ACCENT
+const isHold = (phase: PhaseKind | null): boolean => phase === 'holdTop' || phase === 'holdBottom'
+
+const phaseColor = (phase: PhaseKind | null): string =>
+  phase === 'eccentric'
+    ? ECCENTRIC_COLOR
+    : phase === 'concentric'
+      ? CONCENTRIC_COLOR
+      : isHold(phase)
+        ? HOLD_COLOR
+        : ACCENT
+
+const phaseLabel = (phase: PhaseKind | null, status: string): string =>
+  phase === 'eccentric'
+    ? 'ECCENTRIC'
+    : phase === 'concentric'
+      ? 'CONCENTRIC'
+      : phase === 'holdTop'
+        ? 'HOLD · TOP'
+        : phase === 'holdBottom'
+          ? 'HOLD · BOTTOM'
+          : status
 
 const roundRectPath = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) => {
   ctx.beginPath()
@@ -131,9 +151,9 @@ export const drawOverlay = (
   ctx.fillText(`${hud.exerciseName.toUpperCase()} · ${Math.round(hud.fps)} fps`, w - pad, pad)
   ctx.textAlign = 'left'
 
-  // Phase pill + live timer
+  // Phase pill + live timer (eccentric red / concentric green / hold amber)
   const pillY = h - pad - 56 * unit
-  const label = hud.phase === 'eccentric' ? 'ECCENTRIC' : hud.phase === 'concentric' ? 'CONCENTRIC' : hud.status
+  const label = phaseLabel(hud.phase, hud.status)
   ctx.font = `700 ${26 * unit}px system-ui, sans-serif`
   const labelW = ctx.measureText(label).width
   const pillW = labelW + 40 * unit

@@ -8,8 +8,10 @@ export interface SetAggregate {
   avgPeakVelocity: number
   avgMeanConcentricVelocity: number
   bestConcentricVelocity: number
-  /** Time under tension = sum of eccentric + concentric across all reps. */
+  /** Time under tension = sum of eccentric + concentric (MOVING time) across all reps. */
   timeUnderTensionMs: number
+  /** Total paused/holding time across the set (top + bottom holds); 0 for old sets. */
+  totalHoldMs: number
 }
 
 const mean = (xs: number[]): number => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0)
@@ -23,6 +25,7 @@ export const aggregateReps = (reps: RepMetrics[]): SetAggregate => ({
   avgMeanConcentricVelocity: mean(reps.map((r) => r.meanConcentricVelocity)),
   bestConcentricVelocity: reps.reduce((m, r) => Math.max(m, r.meanConcentricVelocity), 0),
   timeUnderTensionMs: reps.reduce((a, r) => a + r.eccentricMs + r.concentricMs, 0),
+  totalHoldMs: reps.reduce((a, r) => a + (r.holdTopMs ?? 0) + (r.holdBottomMs ?? 0), 0),
 })
 
 /**

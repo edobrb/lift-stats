@@ -26,9 +26,9 @@ const noise = (amp: number): number => {
 // startsConcentric: deadlift/pullup begin by moving UP (y decreasing) from the bottom.
 const buildSignal = (
   n: number,
-  opts: { top: number; bottom: number; eccS: number; conS: number; holdS: number; fps: number; startsConcentric: boolean; noiseAmp: number },
+  opts: { top: number; bottom: number; eccS: number; conS: number; holdS: number; fps: number; startsConcentric: boolean; noiseAmp: number; midHoldS?: number; easeIn?: boolean },
 ): Sample[] => {
-  const { top, bottom, eccS, conS, holdS, fps, startsConcentric, noiseAmp } = opts
+  const { top, bottom, eccS, conS, holdS, fps, startsConcentric, noiseAmp, midHoldS = 0, easeIn = false } = opts
   const dt = 1 / fps
   const samples: Sample[] = []
   let t = 0
@@ -38,27 +38,43 @@ const buildSignal = (
     t += dt
     frame += 1
   }
+  // smoothstep eases the ramp in AND out (slow start, fast middle) — a realistic lift moves
+  // off an extreme gradually, which is exactly what makes naive onset detection lag.
+  const shape = (p: number) => (easeIn ? p * p * (3 - 2 * p) : p)
   const ramp = (from: number, to: number, secs: number) => {
     const steps = Math.max(1, Math.round(secs / dt))
-    for (let i = 1; i <= steps; i++) push(from + (to - from) * (i / steps))
+    for (let i = 1; i <= steps; i++) push(from + (to - from) * shape(i / steps))
   }
   const hold = (y: number, secs: number) => {
     const steps = Math.max(1, Math.round(secs / dt))
     for (let i = 0; i < steps; i++) push(y)
+  }
+  // A moving phase, optionally with a sticking-point pause at its MIDPOINT (a dwell where
+  // the load briefly stops then CONTINUES in the same direction). The phase's moving time
+  // must still be measured as `secs` total — the mid pause must not leak into the next phase.
+  const movePhase = (from: number, to: number, secs: number) => {
+    if (midHoldS > 0) {
+      const mid = (from + to) / 2
+      ramp(from, mid, secs / 2)
+      hold(mid, midHoldS)
+      ramp(mid, to, secs / 2)
+    } else {
+      ramp(from, to, secs)
+    }
   }
 
   // Settle at the starting position.
   hold(startsConcentric ? bottom : top, 0.6)
   for (let r = 0; r < n; r++) {
     if (startsConcentric) {
-      ramp(bottom, top, conS) // concentric (up)
+      movePhase(bottom, top, conS) // concentric (up)
       hold(top, holdS)
-      ramp(top, bottom, eccS) // eccentric (down)
+      movePhase(top, bottom, eccS) // eccentric (down)
       hold(bottom, holdS)
     } else {
-      ramp(top, bottom, eccS) // eccentric (down)
+      movePhase(top, bottom, eccS) // eccentric (down)
       hold(bottom, holdS)
-      ramp(bottom, top, conS) // concentric (up)
+      movePhase(bottom, top, conS) // concentric (up)
       hold(top, holdS)
     }
   }
@@ -87,16 +103,35 @@ interface Case {
   n: number
   eccS: number
   conS: number
+  holdS: number // dwell injected at BOTH extremes of every rep
   startsConcentric: boolean
   noiseAmp: number
+  midHoldS?: number // optional sticking-point pause at the MIDPOINT of each moving phase
+  easeIn?: boolean // ramps accelerate gradually (realistic), which stresses onset latency
+  maxOnsetLagMs?: number // assert each rep's first-phase start lags the true onset by < this
 }
 
 const cases: Case[] = [
-  { label: 'Squat ×5 (clean, 2s ecc / 1s con)', exercise: 'squat', n: 5, eccS: 2.0, conS: 1.0, startsConcentric: false, noiseAmp: 0 },
-  { label: 'Squat ×8 (noisy)', exercise: 'squat', n: 8, eccS: 1.5, conS: 0.8, startsConcentric: false, noiseAmp: 0.006 },
-  { label: 'Bench ×6 (small ROM, noisy)', exercise: 'bench', n: 6, eccS: 1.2, conS: 0.6, startsConcentric: false, noiseAmp: 0.005 },
-  { label: 'Deadlift ×5 (starts concentric)', exercise: 'deadlift', n: 5, eccS: 1.5, conS: 1.2, startsConcentric: true, noiseAmp: 0.004 },
-  { label: 'Pull-up ×10 (starts concentric, fast)', exercise: 'pullup', n: 10, eccS: 1.0, conS: 0.9, startsConcentric: true, noiseAmp: 0.004 },
+  { label: 'Squat ×5 (clean, 2s ecc / 1s con)', exercise: 'squat', n: 5, eccS: 2.0, conS: 1.0, holdS: 0.25, startsConcentric: false, noiseAmp: 0 },
+  { label: 'Squat ×8 (noisy)', exercise: 'squat', n: 8, eccS: 1.5, conS: 0.8, holdS: 0.25, startsConcentric: false, noiseAmp: 0.006 },
+  { label: 'Bench ×6 (small ROM, noisy)', exercise: 'bench', n: 6, eccS: 1.2, conS: 0.6, holdS: 0.25, startsConcentric: false, noiseAmp: 0.005 },
+  { label: 'Deadlift ×5 (starts concentric)', exercise: 'deadlift', n: 5, eccS: 1.5, conS: 1.2, holdS: 0.25, startsConcentric: true, noiseAmp: 0.004 },
+  { label: 'Pull-up ×10 (starts concentric, fast)', exercise: 'pullup', n: 10, eccS: 1.0, conS: 0.9, holdS: 0.25, startsConcentric: true, noiseAmp: 0.004 },
+  // Paused squat: a LONG dwell at the bottom (1.5s) must be separated out as holdBottom,
+  // leaving the moving ecc/con phases short — not folded into a 3.5s "eccentric".
+  { label: 'Paused squat ×4 (1.5s bottom pause)', exercise: 'squat', n: 4, eccS: 1.2, conS: 0.9, holdS: 1.5, startsConcentric: false, noiseAmp: 0.004 },
+  // Realistic phone jitter (noiseAmp 0.012, well above the others) with a long 1.5s hold:
+  // the net-displacement classifier must still detect the hold rather than letting jitter
+  // mask it and fold it into the moving phases.
+  { label: 'Squat ×4 (realistic jitter, 1.5s holds)', exercise: 'squat', n: 4, eccS: 1.5, conS: 1.0, holdS: 1.5, startsConcentric: false, noiseAmp: 0.012 },
+  // Sticking point: a 0.5s pause MID-eccentric and MID-concentric. The moving ecc/con
+  // times must stay ≈ the true ramp durations — the post-pause motion must NOT leak into
+  // the next phase (the bug where holdMs>0 wrongly banked all later motion to postHold).
+  { label: 'Squat ×4 (0.5s mid-phase sticking pause)', exercise: 'squat', n: 4, eccS: 1.4, conS: 1.0, holdS: 0.25, startsConcentric: false, noiseAmp: 0.004, midHoldS: 0.5 },
+  // Realistic gradual acceleration off the extremes (ease-in) with long holds: the down
+  // phase of each rep must begin close to the TRUE descent onset, not ~10 frames late once
+  // the displacement finally crosses the move threshold. Asserts the onset lag stays small.
+  { label: 'Squat ×4 (ease-in onset, 1.0s holds)', exercise: 'squat', n: 4, eccS: 1.4, conS: 1.0, holdS: 1.0, startsConcentric: false, noiseAmp: 0.005, easeIn: true, maxOnsetLagMs: 300 },
 ]
 
 for (const c of cases) {
@@ -105,24 +140,87 @@ for (const c of cases) {
     bottom: c.exercise === 'bench' ? 0.45 : 0.62,
     eccS: c.eccS,
     conS: c.conS,
-    holdS: 0.25,
+    holdS: c.holdS,
     fps: 30,
     startsConcentric: c.startsConcentric,
     noiseAmp: c.noiseAmp,
+    midHoldS: c.midHoldS ?? 0,
+    easeIn: c.easeIn ?? false,
   })
   const reps = run(c.exercise, signal)
   const avgEcc = mean(reps.map((r) => r.eccentricMs)) / 1000
   const avgCon = mean(reps.map((r) => r.concentricMs)) / 1000
+  const avgHoldTop = mean(reps.map((r) => r.holdTopMs ?? 0)) / 1000
+  const avgHoldBottom = mean(reps.map((r) => r.holdBottomMs ?? 0)) / 1000
 
   console.log(`\n${c.label}`)
   console.log(`   reps=${reps.length}/${c.n}  avgEcc=${avgEcc.toFixed(2)}s (want ~${c.eccS})  avgCon=${avgCon.toFixed(2)}s (want ~${c.conS})`)
+  console.log(`   avgHoldTop=${avgHoldTop.toFixed(2)}s  avgHoldBottom=${avgHoldBottom.toFixed(2)}s (each want ~${c.holdS})`)
   expect(`${c.label}: rep count`, reps.length >= c.n - 1 && reps.length <= c.n, `got ${reps.length}, expected ${c.n}`)
   if (reps.length > 0) {
-    expect(`${c.label}: eccentric timing`, Math.abs(avgEcc - c.eccS) <= c.eccS * 0.3 + 0.15, `${avgEcc.toFixed(2)}s vs ${c.eccS}s`)
-    expect(`${c.label}: concentric timing`, Math.abs(avgCon - c.conS) <= c.conS * 0.3 + 0.15, `${avgCon.toFixed(2)}s vs ${c.conS}s`)
+    // MOVING-ONLY ecc/con: must track the pure ramp durations and EXCLUDE the holds.
+    expect(`${c.label}: eccentric timing (moving only)`, Math.abs(avgEcc - c.eccS) <= c.eccS * 0.3 + 0.15, `${avgEcc.toFixed(2)}s vs ${c.eccS}s`)
+    expect(`${c.label}: concentric timing (moving only)`, Math.abs(avgCon - c.conS) <= c.conS * 0.3 + 0.2, `${avgCon.toFixed(2)}s vs ${c.conS}s`)
+    // Holds: each extreme's dwell must be detected ≈ the injected holdS, not lost into a
+    // moving phase. Tolerance allows for the velocity-band edges trimming a little. Skipped
+    // for the mid-phase-pause case, where the sticking-point dwell is (acceptably) folded
+    // into the phase's extreme hold bucket and so inflates it beyond holdS.
+    if (!c.midHoldS) {
+      const holdTol = c.holdS * 0.35 + 0.12
+      expect(`${c.label}: hold-top detected`, Math.abs(avgHoldTop - c.holdS) <= holdTol, `${avgHoldTop.toFixed(2)}s vs ${c.holdS}s`)
+      expect(`${c.label}: hold-bottom detected`, Math.abs(avgHoldBottom - c.holdS) <= holdTol, `${avgHoldBottom.toFixed(2)}s vs ${c.holdS}s`)
+    }
     // Frame counts should be plausible (>0) and consistent with ~30fps.
     const fr = reps[0]!
     expect(`${c.label}: frame counts populated`, fr.eccentricFrames > 0 && fr.concentricFrames > 0, `ecc=${fr.eccentricFrames} con=${fr.concentricFrames} frames`)
+    // Hold frames should be populated across the set (the very first rep's leading dwell
+    // is the discarded settle, and noise can drop a single rep's hold below MIN_HOLD, so
+    // assert on the set average rather than one rep).
+    const avgHoldTopFrames = mean(reps.map((r) => r.holdTopFrames ?? 0))
+    const avgHoldBottomFrames = mean(reps.map((r) => r.holdBottomFrames ?? 0))
+    expect(`${c.label}: hold frame counts populated`, avgHoldTopFrames > 0 && avgHoldBottomFrames > 0, `avg holdTop=${avgHoldTopFrames.toFixed(1)} holdBottom=${avgHoldBottomFrames.toFixed(1)} frames`)
+
+    // Reps must TILE the timeline: each rep's start coincides with the previous rep's end
+    // (the trailing hold belongs to the rep that ends, not the next one). Catches the
+    // overlap bug where rep N+1 started at the extreme, before rep N's trailing hold ended.
+    let maxAdj = 0
+    for (let i = 0; i < reps.length - 1; i++) {
+      maxAdj = Math.max(maxAdj, Math.abs(reps[i + 1]!.startMs - reps[i]!.endMs))
+    }
+    expect(`${c.label}: reps contiguous (no overlap)`, maxAdj < 1, `max |start[i+1]-end[i]| = ${maxAdj.toFixed(2)}ms`)
+
+    // A rep's drawn SPAN (end-start) must ≈ the sum of its phase durations. Catches the
+    // run.t-creep bug where a long hold's timestamp drift inflated endMs far past the sum,
+    // bleeding the rep's editor blocks across its neighbours. Lenient: smoothing/hysteresis
+    // make span and sum differ by a little, but never by the ~60% the creep bug produced.
+    let maxSpanErr = 0
+    for (const r of reps) {
+      const span = r.endMs - r.startMs
+      const sum = r.eccentricMs + r.concentricMs + (r.holdTopMs ?? 0) + (r.holdBottomMs ?? 0)
+      maxSpanErr = Math.max(maxSpanErr, Math.abs(span - sum))
+    }
+    const meanSpan = mean(reps.map((r) => r.endMs - r.startMs))
+    expect(`${c.label}: rep span ≈ sum of phases`, maxSpanErr <= 0.2 * meanSpan + 200, `max |span-sum| = ${maxSpanErr.toFixed(0)}ms (span≈${meanSpan.toFixed(0)}ms)`)
+
+    // Onset latency: the first phase of each rep must begin close to the TRUE motion onset.
+    // For an eccentric-first cycle the rep r (0-indexed) starts descending at
+    // settle + r·(eccS + holdS + conS + holdS). We assert the detected start doesn't lag it
+    // by more than maxOnsetLagMs — the fix that pulls the down phase back to where the lifter
+    // actually started moving instead of ~10 frames later at detection.
+    if (c.maxOnsetLagMs !== undefined && !c.startsConcentric) {
+      const settleS = 0.6
+      const cycleS = c.eccS + c.conS + 2 * c.holdS
+      let maxLag = -Infinity
+      let minLag = Infinity
+      reps.forEach((r, i) => {
+        const trueOnsetMs = (settleS + i * cycleS) * 1000
+        const lag = r.startMs - trueOnsetMs // +ve = detected late
+        maxLag = Math.max(maxLag, lag)
+        minLag = Math.min(minLag, lag)
+      })
+      console.log(`   onset lag: ${(minLag / 1000 * 30).toFixed(1)}..${(maxLag / 1000 * 30).toFixed(1)} frames @30fps`)
+      expect(`${c.label}: down starts near true onset`, Math.abs(maxLag) <= c.maxOnsetLagMs && Math.abs(minLag) <= c.maxOnsetLagMs, `lag range ${minLag.toFixed(0)}..${maxLag.toFixed(0)}ms (max ±${c.maxOnsetLagMs})`)
+    }
   }
 }
 

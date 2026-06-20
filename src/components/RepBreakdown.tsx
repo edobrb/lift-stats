@@ -15,6 +15,8 @@ export const RepBreakdown = ({
   }
 
   const maxVel = Math.max(...reps.map((r) => r.meanConcentricVelocity), 0.0001)
+  // Only surface the hold column if any rep actually has hold data (old sets won't).
+  const hasHolds = reps.some((r) => (r.holdTopMs ?? 0) > 0 || (r.holdBottomMs ?? 0) > 0)
 
   return (
     <div className="breakdown">
@@ -34,6 +36,7 @@ export const RepBreakdown = ({
               <th>#</th>
               <th>Ecc ↓</th>
               <th>Con ↑</th>
+              {hasHolds ? <th title="Pause held at the top / bottom of the rep">Hold ▲/▼</th> : null}
               <th>Frames</th>
               <th>ROM</th>
               <th>Vel</th>
@@ -46,6 +49,11 @@ export const RepBreakdown = ({
                 <td>{i + 1}</td>
                 <td>{formatSeconds(r.eccentricMs)}</td>
                 <td>{formatSeconds(r.concentricMs)}</td>
+                {hasHolds ? (
+                  <td className="muted">
+                    {formatSeconds(r.holdTopMs ?? 0)} / {formatSeconds(r.holdBottomMs ?? 0)}
+                  </td>
+                ) : null}
                 <td className="muted">
                   {r.eccentricFrames}/{r.concentricFrames}
                 </td>

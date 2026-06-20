@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import type { ExerciseId, LiftSet, WeightUnit } from '../types'
+import type { ExerciseId, WeightUnit } from '../types'
 
 // Minimal functional store: a value + listeners, consumed via useSyncExternalStore.
 
@@ -61,17 +61,11 @@ export interface PendingSession {
   weight: number | null
 }
 
-export interface ReviewData {
-  set: LiftSet
-  video: { blob: Blob; mime: string } | null
-}
-
 export interface SessionState {
   pending: PendingSession | null
-  review: ReviewData | null
 }
 
-export const sessionStore = createStore<SessionState>({ pending: null, review: null })
+export const sessionStore = createStore<SessionState>({ pending: null })
 
 // Hooks bound to each store.
 export const useApp = (): AppState =>

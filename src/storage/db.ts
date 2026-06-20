@@ -24,6 +24,16 @@ export const getDb = (): Promise<IDBPDatabase<LiftDB>> => {
         sets.createIndex('by-profile-exercise', ['profileId', 'exercise'])
         db.createObjectStore('videos', { keyPath: 'setId' })
       },
+      // Another tab holding an older version blocks our upgrade; drop the cached handle so
+      // a later call can retry once it closes, rather than wedging the DB for the session.
+      blocked: () => console.warn('lift-stats DB upgrade blocked by another open tab.'),
+      terminated: () => {
+        dbPromise = null
+      },
+    }).catch((err) => {
+      // A one-time open failure (private mode, transient quota) must not be cached forever.
+      dbPromise = null
+      throw err
     })
   }
   return dbPromise

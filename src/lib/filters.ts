@@ -7,9 +7,15 @@ export interface OneEuroConfig {
   dCutoff: number // cutoff for the derivative used to drive adaptive smoothing
 }
 
+// Tuned for low latency on a slow 1-D lift signal. minCutoff is raised (less baseline lag)
+// and beta made meaningfully speed-adaptive, so the filter barely lags while the load is
+// moving — this keeps the detected extreme close to the real one in time, so a rep's phase
+// boundaries don't land ~10 frames late. Per-frame jitter is already handled upstream by the
+// median(3) filter and downstream by the net-displacement hold classifier, so the lighter
+// smoothing here doesn't reintroduce false turns.
 export const DEFAULT_ONE_EURO: OneEuroConfig = {
-  minCutoff: 1.4,
-  beta: 0.02,
+  minCutoff: 2.5,
+  beta: 1.0,
   dCutoff: 1.0,
 }
 

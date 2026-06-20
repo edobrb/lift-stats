@@ -9,6 +9,7 @@
   --accent-ink: #0b0f17;
   --green: #22c55e;
   --red: #f43f5e;
+  --amber: #fbbf24;
   --radius: 16px;
   --nav-h: 64px;
   --safe-b: env(safe-area-inset-bottom, 0px);
@@ -396,6 +397,40 @@ h3 {
 .section {
   margin-bottom: 22px;
 }
+.section__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.section__head h3 {
+  margin-bottom: 10px;
+}
+.progress {
+  position: relative;
+  height: 28px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.progress__bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(90deg, var(--accent), #0ea5e9);
+  transition: width 0.15s ease;
+}
+.progress__label {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
 .breakdown {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -459,8 +494,8 @@ h3 {
   border: 1px solid var(--border);
   color: var(--red);
   border-radius: 8px;
-  width: 30px;
-  height: 30px;
+  width: 40px;
+  height: 40px;
   line-height: 1;
   cursor: pointer;
 }
@@ -481,9 +516,95 @@ h3 {
   flex-direction: column;
   gap: 12px;
 }
-.timeline {
+/* Phase colours: down = eccentric (red), up = concentric (green), hold = amber */
+.seg--down {
+  background: var(--red);
+}
+.seg--up {
+  background: var(--green);
+}
+.seg--hold {
+  background: var(--amber);
+}
+
+/* ---- Minimap: whole-set overview. Tap a rep to focus it, drag to scrub. ---- */
+.minimap {
   position: relative;
-  height: 60px;
+  height: 40px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  touch-action: none;
+  cursor: pointer;
+}
+.minimap__band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(56, 189, 248, 0.14);
+  border-left: 1px solid rgba(56, 189, 248, 0.55);
+  border-right: 1px solid rgba(56, 189, 248, 0.55);
+  pointer-events: none;
+}
+.minimap__rep {
+  position: absolute;
+  inset: 0;
+  opacity: 0.5;
+}
+.minimap__rep.is-selected {
+  opacity: 1;
+}
+.minimap__seg {
+  position: absolute;
+  top: 13px;
+  bottom: 7px;
+  border-radius: 2px;
+}
+.minimap__num {
+  position: absolute;
+  top: 1px;
+  transform: translateX(-50%);
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--muted);
+  pointer-events: none;
+}
+.minimap__rep.is-selected .minimap__num {
+  color: var(--text);
+}
+.minimap__playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #fff;
+  box-shadow: 0 0 5px rgba(255, 255, 255, 0.7);
+  pointer-events: none;
+}
+.legend {
+  display: flex;
+  gap: 14px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-top: -2px;
+}
+.legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.legend__dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+/* ---- Zoom editor: the selected rep, large, with draggable phase boundaries ---- */
+.zoom {
+  position: relative;
+  height: 116px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -491,36 +612,55 @@ h3 {
   touch-action: none;
   cursor: pointer;
 }
-.timeline__rep {
+.zoom__rest {
   position: absolute;
-  inset: 0;
+  top: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.28);
+  pointer-events: none;
 }
-.timeline__rep.is-selected .timeline__seg {
-  top: 8px;
-  bottom: 8px;
-  filter: brightness(1.25);
-}
-.timeline__seg {
+.zoom__block {
   position: absolute;
-  top: 14px;
-  bottom: 14px;
-  border-radius: 3px;
-  opacity: 0.9;
+  top: 38px;
+  bottom: 38px;
+  opacity: 0.92;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
 }
-.seg--ecc {
-  background: var(--red);
+.zoom__block + .zoom__block {
+  box-shadow: inset 1px 0 0 rgba(11, 15, 23, 0.5);
 }
-.seg--con {
-  background: var(--green);
+.zoom__blocklabel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.15;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: rgba(11, 15, 23, 0.85);
+  pointer-events: none;
+  text-align: center;
 }
-.timeline__playhead {
+.zoom__blocklabel em {
+  font-style: normal;
+  font-weight: 600;
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.82;
+}
+.zoom__playhead {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 2px;
   background: #fff;
-  box-shadow: 0 0 6px rgba(255, 255, 255, 0.7);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.8);
   pointer-events: none;
+}
+.zoom__playhead.is-out {
+  opacity: 0.3;
 }
 .transport {
   display: flex;
@@ -545,6 +685,16 @@ h3 {
   color: var(--accent-ink);
   border-color: var(--accent);
 }
+.tbtn--loop {
+  font-size: 0.95rem;
+  opacity: 0.55;
+}
+.tbtn--loop.is-active {
+  opacity: 1;
+  background: var(--surface-2);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
 .transport__time {
   margin-left: auto;
   font-variant-numeric: tabular-nums;
@@ -557,8 +707,8 @@ h3 {
   gap: 6px;
 }
 .rep-pip {
-  min-width: 34px;
-  height: 34px;
+  min-width: 40px;
+  height: 40px;
   border-radius: 8px;
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -591,71 +741,127 @@ h3 {
   font-size: 0.85rem;
 }
 
-/* Draggable boundary handles on the timeline */
-.handle {
+/* Draggable phase-boundary handles on the zoom editor. Interior handles sit in a top or
+   bottom zone so a collapsed hold (two coincident points) keeps both grips grabbable. */
+.zhandle {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 26px;
-  margin-left: -13px;
+  width: 30px;
+  margin-left: -15px;
   background: none;
   border: none;
   padding: 0;
   cursor: ew-resize;
   touch-action: none;
-  z-index: 3;
+  z-index: 4;
 }
-.handle__grip {
+.zhandle--edge {
+  top: 0;
+  bottom: 0;
+  width: 22px;
+  margin-left: -11px;
+}
+.zhandle--top {
+  top: 0;
+  height: 42px;
+}
+.zhandle--bottom {
+  bottom: 0;
+  height: 42px;
+}
+.zhandle__line {
   position: absolute;
   left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: 4px;
-  height: 76%;
-  border-radius: 3px;
-  background: #fff;
-  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4);
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+  transform: translateX(-50%);
+  pointer-events: none;
 }
-.handle--turn .handle__grip {
-  background: #fbbf24;
+.zhandle__pill {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 6px;
+  border-radius: 7px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  pointer-events: none;
 }
-.handle.is-active .handle__grip {
-  width: 7px;
-  box-shadow: 0 0 0 2px var(--accent), 0 0 8px rgba(56, 189, 248, 0.6);
+.zhandle--top .zhandle__pill {
+  top: 2px;
 }
-.boundaries {
+.zhandle--bottom .zhandle__pill,
+.zhandle--edge .zhandle__pill {
+  bottom: 2px;
+}
+.zhandle.is-active {
+  z-index: 6;
+}
+.zhandle.is-active .zhandle__line {
+  background: var(--accent);
+  width: 3px;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.7);
+}
+.zhandle.is-active .zhandle__pill {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Boundary chips: select-then-nudge any phase point precisely. A distinct class from the
+   HistoryScreen filter `.chip` pills — they used to share the name, and the pill's solid
+   accent fill + this block's accent label combined into an invisible blue-on-blue label on
+   the active chip. The active boundary chip keeps the dark surface (accent border + ring
+   signal selection), so both the accent label and the time stay readable. */
+.bchips {
   display: flex;
-  gap: 8px;
-  margin: 4px 0 10px;
+  gap: 6px;
+  margin: 6px 0 10px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
 }
-.boundary {
-  flex: 1;
+.bchips::-webkit-scrollbar {
+  display: none;
+}
+.bchip {
+  flex: 1 0 auto;
+  min-width: 60px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 9px 6px;
+  border-radius: 10px;
+  padding: 8px;
   color: var(--text);
   cursor: pointer;
 }
-.boundary.is-active {
+.bchip.is-active {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent) inset;
 }
-.boundary__label {
-  font-size: 0.68rem;
+.bchip__label {
+  font-size: 0.62rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.03em;
   color: var(--muted);
+  white-space: nowrap;
 }
-.boundary.is-active .boundary__label {
+.bchip.is-active .bchip__label {
   color: var(--accent);
 }
-.boundary__time {
+.bchip__time {
   font-weight: 700;
+  font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -815,5 +1021,28 @@ h3 {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* ---- Accessibility ---- */
+/* A visible focus ring on every interactive control for keyboard / switch users (WCAG
+   2.4.7). :focus-visible keeps it off mouse/touch taps so it doesn't add noise. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Respect "Reduce Motion": stop the infinite spinner and feedback transitions for users
+   with vestibular-motion sensitivity (iOS "Reduce Motion"). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+  /* Keep a static partial ring as a loading cue instead of a spin. */
+  .spinner {
+    animation: none;
   }
 }

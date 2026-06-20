@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import type { ExerciseConfig } from '../config/exercises'
-import type { Phase, RepMetrics } from '../types'
+import type { PhaseKind, RepMetrics } from '../types'
 import { createPoseEngine, type PoseEngine } from '../lib/pose'
 import {
   startCamera,
@@ -24,7 +24,7 @@ export type TrackerStatus = 'idle' | 'loading' | 'tracking' | 'stopping' | 'erro
 
 export interface LiveStats {
   repCount: number
-  phase: Phase | null
+  phase: PhaseKind | null // includes hold states while the lifter pauses at an extreme
   fps: number
   delegate: 'GPU' | 'CPU' | null
   personDetected: boolean
@@ -66,6 +66,7 @@ export const usePoseTracker = (
   const stopLoopRef = useRef<(() => void) | null>(null)
 
   const traceRef = useRef<number[]>([])
+  const stoppingRef = useRef<Promise<SetResult> | null>(null)
   const fpsRef = useRef(0)
   const startMediaRef = useRef<number | null>(null)
   const startFramesRef = useRef<number | null>(null)
@@ -181,6 +182,7 @@ export const usePoseTracker = (
     try {
       detectorRef.current = createRepDetector(exercise)
       traceRef.current = []
+      stoppingRef.current = null
       startMediaRef.current = null
       startFramesRef.current = null
       fpsRef.current = 0
@@ -219,37 +221,45 @@ export const usePoseTracker = (
     }
   }, [exercise, recordVideo, onFrame, teardown, videoRef, canvasRef])
 
-  const stop = useCallback(async (): Promise<SetResult> => {
-    setStatus('stopping')
-    if (watchdogRef.current) {
-      clearTimeout(watchdogRef.current)
-      watchdogRef.current = null
-    }
-    stopLoopRef.current?.()
-    stopLoopRef.current = null
+  const stop = useCallback((): Promise<SetResult> => {
+    // Re-entrancy guard: a manual Stop and the background-stop (visibility hidden) can fire
+    // almost together. Return the in-flight stop so the hardware is torn down and the
+    // detector finalized exactly once, and both callers see the same result.
+    if (stoppingRef.current) return stoppingRef.current
+    const run = (async (): Promise<SetResult> => {
+      setStatus('stopping')
+      if (watchdogRef.current) {
+        clearTimeout(watchdogRef.current)
+        watchdogRef.current = null
+      }
+      stopLoopRef.current?.()
+      stopLoopRef.current = null
 
-    const recorder = recorderRef.current
-    recorderRef.current = null
-    const video = recorder ? await recorder.stop() : null
+      const recorder = recorderRef.current
+      recorderRef.current = null
+      const video = recorder ? await recorder.stop() : null
 
-    stopCamera(streamRef.current, videoRef.current)
-    streamRef.current = null
+      stopCamera(streamRef.current, videoRef.current)
+      streamRef.current = null
 
-    const detector = detectorRef.current
-    if (detector) finalizeRepDetector(detector)
-    // Rebase rep times to be zero-based against the recorded video (whose playback
-    // timeline starts at ~0), so the editor's handles line up with the footage.
-    const origin = (startMediaRef.current ?? 0) * 1000
-    const reps = (detector ? detector.reps : []).map((r) => ({
-      ...r,
-      startMs: Math.max(0, r.startMs - origin),
-      endMs: Math.max(0, r.endMs - origin),
-    }))
-    const durationMs = Math.max(0, (lastMediaRef.current - (startMediaRef.current ?? lastMediaRef.current)) * 1000)
+      const detector = detectorRef.current
+      if (detector) finalizeRepDetector(detector)
+      // Rebase rep times to be zero-based against the recorded video (whose playback
+      // timeline starts at ~0), so the editor's handles line up with the footage.
+      const origin = (startMediaRef.current ?? 0) * 1000
+      const reps = (detector ? detector.reps : []).map((r) => ({
+        ...r,
+        startMs: Math.max(0, r.startMs - origin),
+        endMs: Math.max(0, r.endMs - origin),
+      }))
+      const durationMs = Math.max(0, (lastMediaRef.current - (startMediaRef.current ?? lastMediaRef.current)) * 1000)
 
-    setStatus('idle')
-    setLive((l) => ({ ...l, phase: null }))
-    return { reps, durationMs, fps: fpsRef.current, video }
+      setStatus('idle')
+      setLive((l) => ({ ...l, phase: null }))
+      return { reps, durationMs, fps: fpsRef.current, video }
+    })()
+    stoppingRef.current = run
+    return run
   }, [videoRef])
 
   // Release hardware on unmount (includes finalizing any active recorder).

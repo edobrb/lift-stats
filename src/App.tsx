@@ -5,11 +5,10 @@ import { BottomNav } from './components/BottomNav'
 import { ProfilesScreen } from './screens/ProfilesScreen'
 import { HomeScreen } from './screens/HomeScreen'
 import { TrackingScreen } from './screens/TrackingScreen'
-import { ReviewScreen } from './screens/ReviewScreen'
 import { HistoryScreen } from './screens/HistoryScreen'
 import { SetDetailScreen } from './screens/SetDetailScreen'
 
-const FULLSCREEN: Route['name'][] = ['track', 'review']
+const FULLSCREEN: Route['name'][] = ['track']
 
 const navTab = (name: Route['name']): Route['name'] => (name === 'setDetail' ? 'history' : name)
 
@@ -30,8 +29,6 @@ export const App = () => {
         return <HomeScreen />
       case 'track':
         return <TrackingScreen />
-      case 'review':
-        return <ReviewScreen />
       case 'history':
         return <HistoryScreen />
       case 'setDetail':

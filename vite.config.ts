@@ -22,7 +22,9 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,task}'],
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
-        navigateFallbackDenylist: [/^\/lift-stats\/mediapipe\//],
+        // Base-agnostic (matches the runtimeCaching urlPattern convention below) so it keeps
+        // working under any base — local preview, a fork, or a renamed repo.
+        navigateFallbackDenylist: [/mediapipe\//],
         runtimeCaching: [
           {
             urlPattern: /\/mediapipe\/wasm\/.*\.wasm$/,

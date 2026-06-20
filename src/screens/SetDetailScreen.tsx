@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { LiftSet, RepMetrics } from '../types'
 import { getExercise } from '../config/exercises'
 import { aggregateReps, velocityLossPct } from '../lib/metrics'
+import { analyzeVideo } from '../lib/analyzeVideo'
 import { getSet, getSetVideo, deleteSet, updateSet } from '../storage/sets'
-import { navigate } from '../hooks/useRouter'
+import { exportSetJson } from '../lib/exportSet'
+import { navigate, setLeaveGuard } from '../hooks/useRouter'
 import { formatClock, formatDate, formatRom, formatSeconds, formatVelocity } from '../lib/timing'
 import { Stat } from '../components/Stat'
 import { RepBreakdown } from '../components/RepBreakdown'
@@ -15,6 +17,9 @@ export const SetDetailScreen = ({ id }: { id: string }) => {
   const [reps, setReps] = useState<RepMetrics[]>([])
   const [dirty, setDirty] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [recomputing, setRecomputing] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     let active = true
@@ -30,7 +35,8 @@ export const SetDetailScreen = ({ id }: { id: string }) => {
     }
   }, [id])
 
-  // Warn before a full page unload while rep-boundary edits are unsaved.
+  // Warn before leaving with unsaved rep-boundary edits: beforeunload covers a full page
+  // reload/close, and the router leave-guard covers in-app navigation (nav tabs, back link).
   useEffect(() => {
     if (!dirty) return
     const handler = (e: BeforeUnloadEvent) => {
@@ -38,11 +44,16 @@ export const SetDetailScreen = ({ id }: { id: string }) => {
       e.returnValue = ''
     }
     window.addEventListener('beforeunload', handler)
-    return () => window.removeEventListener('beforeunload', handler)
+    setLeaveGuard(() => window.confirm('Discard unsaved rep edits?'))
+    return () => {
+      window.removeEventListener('beforeunload', handler)
+      setLeaveGuard(null)
+    }
   }, [dirty])
 
   const remove = async () => {
     if (!window.confirm('Delete this set and its recording?')) return
+    setLeaveGuard(null) // deleting intentionally discards edits — don't double-prompt
     await deleteSet(id)
     navigate({ name: 'history' })
   }
@@ -68,6 +79,34 @@ export const SetDetailScreen = ({ id }: { id: string }) => {
     setReps((current) => current.filter((r) => r !== rep))
     setDirty(true)
   }
+
+  // Re-run pose detection over the saved clip with the current detector (backfills
+  // holds onto old sets, re-applies detector improvements). Loads as unsaved edits.
+  const recompute = async () => {
+    if (!videoBlob || !set || recomputing) return
+    const controller = new AbortController()
+    abortRef.current = controller
+    setRecomputing(true)
+    setProgress(0)
+    try {
+      const result = await analyzeVideo(videoBlob, getExercise(set.exercise), {
+        fps: set.fps,
+        onProgress: setProgress,
+        signal: controller.signal,
+      })
+      setReps(result.reps)
+      setDirty(true)
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === 'AbortError')) {
+        window.alert(`Recompute failed: ${err instanceof Error ? err.message : 'unknown error'}`)
+      }
+    } finally {
+      setRecomputing(false)
+      abortRef.current = null
+    }
+  }
+
+  const cancelRecompute = () => abortRef.current?.abort()
 
   if (loading) {
     return (
@@ -111,6 +150,7 @@ export const SetDetailScreen = ({ id }: { id: string }) => {
         <Stat label="Avg eccentric" value={formatSeconds(agg.avgEccentricMs)} />
         <Stat label="Avg concentric" value={formatSeconds(agg.avgConcentricMs)} />
         <Stat label="Time under tension" value={formatClock(agg.timeUnderTensionMs)} />
+        {agg.totalHoldMs > 0 ? <Stat label="Hold time" value={formatClock(agg.totalHoldMs)} /> : null}
         <Stat label="Avg ROM" value={formatRom(agg.avgRangeOfMotion)} />
         <Stat label="Best velocity" value={formatVelocity(agg.bestConcentricVelocity)} />
         <Stat label="Velocity loss" value={`${velocityLossPct(reps)}%`} />
@@ -119,7 +159,28 @@ export const SetDetailScreen = ({ id }: { id: string }) => {
 
       {videoBlob ? (
         <section className="section">
-          <h3>Rewatch & adjust reps</h3>
+          <div className="section__head">
+            <h3>Rewatch & adjust reps</h3>
+            {recomputing ? (
+              <button className="btn btn--ghost btn--sm" onClick={cancelRecompute}>
+                Cancel
+              </button>
+            ) : (
+              <button
+                className="btn btn--ghost btn--sm"
+                onClick={recompute}
+                title="Re-detect every rep from the video with the latest detector"
+              >
+                ↻ Recompute
+              </button>
+            )}
+          </div>
+          {recomputing && (
+            <div className="progress" role="progressbar" aria-valuenow={Math.round(progress * 100)}>
+              <div className="progress__bar" style={{ width: `${Math.round(progress * 100)}%` }} />
+              <span className="progress__label">Recomputing reps… {Math.round(progress * 100)}%</span>
+            </div>
+          )}
           <RepEditor
             blob={videoBlob}
             reps={reps}
@@ -140,6 +201,9 @@ export const SetDetailScreen = ({ id }: { id: string }) => {
       </section>
 
       <div className="actions">
+        <button className="btn btn--ghost" onClick={() => void exportSetJson(set, reps)}>
+          ⬇ Export JSON
+        </button>
         <button className="btn btn--danger" onClick={remove}>
           Delete set
         </button>

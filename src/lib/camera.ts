@@ -14,15 +14,38 @@ export const startCamera = async (video: HTMLVideoElement): Promise<MediaStream>
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error('Camera API unavailable. Use HTTPS (or localhost) on a supported browser.')
   }
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: {
-      facingMode: { ideal: 'environment' },
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
-      frameRate: { ideal: 30, max: 60 },
-    },
-  })
+  let stream: MediaStream
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        frameRate: { ideal: 30, max: 60 },
+      },
+    })
+  } catch (err) {
+    const name = err instanceof DOMException ? err.name : ''
+    // A device that can't satisfy the ideal constraints shouldn't hard-fail — retry bare.
+    if (name === 'OverconstrainedError') {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true })
+    } else {
+      // Native getUserMedia messages are terse and inconsistent across browsers; map the
+      // common failure names to something the lifter can act on.
+      const message =
+        name === 'NotAllowedError' || name === 'SecurityError'
+          ? 'Camera permission was denied. Allow camera access in your browser settings and try again.'
+          : name === 'NotReadableError'
+            ? 'The camera is in use by another app. Close it and try again.'
+            : name === 'NotFoundError'
+              ? 'No camera was found on this device.'
+              : err instanceof Error
+                ? err.message
+                : 'Could not start the camera.'
+      throw new Error(message)
+    }
+  }
   video.srcObject = stream
   video.muted = true
   video.playsInline = true
@@ -115,10 +138,21 @@ export const startRecorder = (stream: MediaStream): Recording | null => {
     return null
   }
   const chunks: Blob[] = []
+  let errored = false
   recorder.ondataavailable = (event) => {
     if (event.data.size > 0) chunks.push(event.data)
   }
+  // A mid-recording failure (codec error, low memory, the camera yanked by another app)
+  // would otherwise be silent and yield a truncated, unplayable blob. Flag it so stop()
+  // hands back null and the set is saved video-less rather than with a broken recording.
+  recorder.onerror = () => {
+    errored = true
+  }
   recorder.start(1000)
+
+  // Below this the blob is effectively empty/corrupt (a header with no real frames); treat
+  // it as no recording so we never persist an unplayable clip.
+  const MIN_BLOB_BYTES = 1024
 
   return {
     stop: () =>
@@ -129,7 +163,8 @@ export const startRecorder = (stream: MediaStream): Recording | null => {
         }
         recorder.onstop = () => {
           const type = recorder.mimeType || mime || 'video/webm'
-          resolve(chunks.length ? { blob: new Blob(chunks, { type }), mime: type } : null)
+          const blob = chunks.length ? new Blob(chunks, { type }) : null
+          resolve(!errored && blob && blob.size >= MIN_BLOB_BYTES ? { blob, mime: type } : null)
         }
         recorder.stop()
       }),

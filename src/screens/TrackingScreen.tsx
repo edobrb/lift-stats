@@ -4,6 +4,7 @@ import { EXERCISES, getExercise } from '../config/exercises'
 import { sessionStore, useApp, useSession } from '../state/store'
 import { usePoseTracker, type SetResult } from '../hooks/usePoseTracker'
 import { navigate, redirect } from '../hooks/useRouter'
+import { saveSet } from '../storage/sets'
 import { makeId } from '../lib/id'
 
 export const TrackingScreen = () => {
@@ -17,11 +18,17 @@ export const TrackingScreen = () => {
 
   const exercise = pending ? getExercise(pending.exercise) : EXERCISES.squat
 
-  // Assemble the set and go to review. Used both by Stop and by the background-stop
-  // handler (so a set is never lost when the OS backgrounds the page mid-set).
-  const buildAndReview = useCallback(
-    (result: SetResult) => {
-      if (!pending) return
+  // Persist the finished set immediately and jump straight to its detail screen — there is
+  // no separate review step (Set Detail already has the rep editor, breakdown and delete).
+  // Used by Stop and by the OS background-stop path (visibility hidden) so a set is never
+  // lost. The detail screen's own dirty-edit guard covers any later boundary edits. Guarded
+  // by savedRef so a manual Stop racing the background-stop can't double-save the set.
+  const savedRef = useRef(false)
+  const buildAndSave = useCallback(
+    async (result: SetResult) => {
+      if (!pending || savedRef.current) return
+      savedRef.current = true
+      const reps = result.reps.map((r, i) => ({ ...r, index: i + 1 }))
       const set: LiftSet = {
         id: makeId(),
         profileId: app.profileId ?? 'unknown',
@@ -31,24 +38,31 @@ export const TrackingScreen = () => {
         startedAt: startedAtRef.current || Date.now(),
         durationMs: result.durationMs,
         fps: Math.round(result.fps),
-        reps: result.reps,
-        repCount: result.reps.length,
+        reps,
+        repCount: reps.length,
         hasVideo: result.video !== null,
         videoMime: result.video?.mime ?? null,
         notes: '',
       }
-      sessionStore.set({ review: { set, video: result.video } })
-      navigate({ name: 'review' })
+      await saveSet(set, result.video)
+      sessionStore.set({ pending: null })
+      // replaceState (redirect) so Back from Set Detail returns Home, not the dead #/track.
+      redirect({ name: 'setDetail', id: set.id })
     },
     [app.profileId, app.unit, pending],
   )
 
-  const tracker = usePoseTracker(videoRef, canvasRef, exercise, app.recordVideo, buildAndReview)
+  const tracker = usePoseTracker(videoRef, canvasRef, exercise, app.recordVideo, buildAndSave)
 
+  // Bounce home only if we land on /track WITHOUT a pending session (e.g. a stale bookmark).
+  // After a save we clear `pending` ourselves and navigate to the new set, so the savedRef
+  // guard prevents this from racing in and redirecting home instead.
   useEffect(() => {
-    if (!pending) redirect({ name: 'home' })
+    if (!pending && !savedRef.current) redirect({ name: 'home' })
   }, [pending])
 
+  // Render nothing once there's no pending session — either a stale visit (the effect above
+  // bounces home) or the brief tick after a save before the route switches to the new set.
   if (!pending) return null
 
   const handleStart = async () => {
@@ -57,7 +71,7 @@ export const TrackingScreen = () => {
   }
 
   const handleStop = async () => {
-    buildAndReview(await tracker.stop())
+    await buildAndSave(await tracker.stop())
   }
 
   const weightLabel = pending.weight !== null ? ` · ${pending.weight}${app.unit}` : ''

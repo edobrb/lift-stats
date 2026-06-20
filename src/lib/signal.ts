@@ -34,7 +34,10 @@ export const extractSignal = (landmarks: Landmark[], cfg: ExerciseConfig): Signa
 
   const shoulder = landmarks[POSE.leftShoulder] ?? landmarks[POSE.rightShoulder]
   const hip = landmarks[POSE.leftHip] ?? landmarks[POSE.rightHip]
-  const scale = shoulder && hip ? Math.max(0.05, Math.abs(hip.y - shoulder.y)) : 0.3
+  // Torso length as the body-scale reference. Use the Euclidean shoulder→hip distance, not
+  // just its vertical component, so it stays meaningful when the lifter is horizontal (bench
+  // press, filmed from the side), where |Δy| collapses to ~0 and would pin to the floor.
+  const scale = shoulder && hip ? Math.max(0.05, Math.hypot(hip.x - shoulder.x, hip.y - shoulder.y)) : 0.3
 
   return { y: sum / count, visibility: minVis, scale }
 }
